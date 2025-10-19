@@ -1,75 +1,54 @@
-// Local: /app/api/telegram/route.js
+// ... (importações do grammy, etc.)
+import { MercadoPagoConfig, Payment } from '@mercadopago/sdk';
 
-import { Bot, GrammyError, HttpError } from "grammy";
-import { NextResponse } from "next/server";
+// Configura o Mercado Pago
+const client = new MercadoPagoConfig({ accessToken: process.env.MP_ACCESS_TOKEN });
 
-const token = process.env.TELEGRAM_TOKEN;
-if (!token) throw new Error("TELEGRAM_TOKEN is unset");
+// ... (código do bot)
 
-const bot = new Bot(token);
-
-// --- LÓGICA DO BOT ---
-
-bot.command("start", async (ctx) => {
-  await ctx.reply("Bem-vindo ao Bot de Apostas! Escolha seu plano:", {
-    reply_markup: {
-      inline_keyboard: [
-        [{ text: "Básico", callback_data: "plano_basico" }],
-        [{ text: "Premium", callback_data: "plano_premium" }],
-        [{ text: "Gold", callback_data: "plano_gold" }],
-      ],
-    },
-  });
-});
-
+// Altere o manipulador de cliques
 bot.on("callback_query:data", async (ctx) => {
-  const data = ctx.callbackQuery.data;
-  console.log("Botão clicado:", data);
+  const data = ctx.callbackQuery.data; // ex: "comprar_premium"
+  const plan = data.split('_')[1]; // "premium"
+  const userId = ctx.from.id;
 
-  let responseText = "Função em desenvolvimento.";
-  if (data === "plano_basico") {
-    responseText = "Simulação Básico: \n- Jogo: Flamengo vs Vasco \n- Casa de Aposta: Bet365";
-  } else if (data === "plano_premium") {
-    responseText = "Simulação Premium: \n- Jogo: Flamengo vs Vasco \n- Probabilidade: Fla 65%, Emp 20%, Vas 15% \n- Estatísticas: Flamengo vem de 5 vitórias seguidas.";
-  } else if (data === "plano_gold") {
-    responseText = "Simulação Gold: \n- Todas as opções anteriores + Aposta automática configurada.";
+  // Preços simulados
+  const prices = {
+    basico: 19.90,
+    premium: 49.90,
+    gold: 99.90,
+  };
+
+  if (!prices[plan]) {
+    await ctx.answerCallbackQuery({ text: "Plano inválido." });
+    return;
   }
 
+  // --- Lógica para Criar o Pagamento ---
   try {
-    await ctx.editMessageText(responseText);
-  } catch (e) {
-    console.error("Erro ao editar a mensagem:", e);
-  }
+    const payment = new Payment(client);
+    const body = {
+      transaction_amount: prices[plan],
+      description: `Plano ${plan} - Bot de Apostas`,
+      payment_method_id: 'pix', // ou pode deixar o usuário escolher
+      payer: {
+        email: `user_${userId}@telegram.bot`, // Email de exemplo
+      },
+      // ESSA É A PARTE MAIS IMPORTANTE
+      external_reference: `${userId}_${plan}`, // Salvamos o ID do Telegram e o plano aqui
+      notification_url: 'https://seu-projeto.vercel.app/api/payment-webhook',
+    };
 
-  await ctx.answerCallbackQuery();
+    const result = await payment.create({ body });
+    const paymentLink = result.point_of_interaction.transaction_data.ticket_url;
+
+    await ctx.reply(`Ótima escolha! Para ativar seu plano ${plan}, realize o pagamento no link abaixo:\n\n${paymentLink}`);
+    await ctx.answerCallbackQuery();
+
+  } catch (error) {
+    console.error("Erro ao criar pagamento:", error);
+    await ctx.reply("Desculpe, não consegui gerar seu link de pagamento. Tente novamente mais tarde.");
+  }
 });
 
-// --- CONFIGURAÇÃO DO WEBHOOK PARA O NEXT.JS ---
-
-// Flag para garantir que o bot seja inicializado apenas uma vez por "instância" da função
-let isBotInitialized = false;
-
-export async function POST(request) {
-  try {
-    // A CORREÇÃO ESTÁ AQUI:
-    // Garante que o bot tenha suas informações (getMe) antes de processar o update.
-    if (!isBotInitialized) {
-      await bot.init();
-      isBotInitialized = true;
-      console.log("Bot inicializado com sucesso!");
-    }
-
-    const payload = await request.json();
-    await bot.handleUpdate(payload);
-    
-    return NextResponse.json({ status: 200, message: "ok" });
-  } catch (error) {
-    console.error(error);
-    if (error instanceof GrammyError) {
-      console.error("Error in request:", error.description);
-    } else if (error instanceof HttpError) {
-      console.error("Could not contact Telegram:", error);
-    }
-    return NextResponse.json({ status: 500, message: "Internal Server Error" });
-  }
-}
+// ... (Restante do código do webhook para o Telegram)
