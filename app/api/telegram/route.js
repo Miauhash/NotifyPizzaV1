@@ -3,7 +3,6 @@
 import { Bot, GrammyError, HttpError } from "grammy";
 import { NextResponse } from "next/server";
 
-// Pega o token do bot das variáveis de ambiente
 const token = process.env.TELEGRAM_TOKEN;
 if (!token) throw new Error("TELEGRAM_TOKEN is unset");
 
@@ -11,7 +10,6 @@ const bot = new Bot(token);
 
 // --- LÓGICA DO BOT ---
 
-// Responde ao comando /start com uma mensagem e os botões
 bot.command("start", async (ctx) => {
   await ctx.reply("Bem-vindo ao Bot de Apostas! Escolha seu plano:", {
     reply_markup: {
@@ -24,12 +22,10 @@ bot.command("start", async (ctx) => {
   });
 });
 
-// Responde aos cliques nos botões (callback_query)
 bot.on("callback_query:data", async (ctx) => {
   const data = ctx.callbackQuery.data;
-  console.log("Botão clicado:", data); // Log para ver no servidor
+  console.log("Botão clicado:", data);
 
-  // Mensagens simuladas para cada plano
   let responseText = "Função em desenvolvimento.";
   if (data === "plano_basico") {
     responseText = "Simulação Básico: \n- Jogo: Flamengo vs Vasco \n- Casa de Aposta: Bet365";
@@ -39,23 +35,36 @@ bot.on("callback_query:data", async (ctx) => {
     responseText = "Simulação Gold: \n- Todas as opções anteriores + Aposta automática configurada.";
   }
 
-  // Edita a mensagem original com a resposta e remove os botões
-  await ctx.editMessageText(responseText);
+  try {
+    await ctx.editMessageText(responseText);
+  } catch (e) {
+    console.error("Erro ao editar a mensagem:", e);
+  }
 
-  // Confirma o recebimento do clique para o Telegram
   await ctx.answerCallbackQuery();
 });
 
 // --- CONFIGURAÇÃO DO WEBHOOK PARA O NEXT.JS ---
 
+// Flag para garantir que o bot seja inicializado apenas uma vez por "instância" da função
+let isBotInitialized = false;
+
 export async function POST(request) {
   try {
+    // A CORREÇÃO ESTÁ AQUI:
+    // Garante que o bot tenha suas informações (getMe) antes de processar o update.
+    if (!isBotInitialized) {
+      await bot.init();
+      isBotInitialized = true;
+      console.log("Bot inicializado com sucesso!");
+    }
+
     const payload = await request.json();
     await bot.handleUpdate(payload);
+    
     return NextResponse.json({ status: 200, message: "ok" });
   } catch (error) {
     console.error(error);
-    // Trata erros específicos da biblioteca grammy
     if (error instanceof GrammyError) {
       console.error("Error in request:", error.description);
     } else if (error instanceof HttpError) {
